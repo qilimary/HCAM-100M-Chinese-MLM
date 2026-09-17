@@ -12,7 +12,9 @@ HCAM 100M 是一个面向中文文本的双向掩码语言模型（MLM）。模�
 
 模型使用 **18,000 个字符 token**作为真正输入输出词表，隐藏维度 1056，上下文长度 600，总计 **102,778,220 个唯一可训练参数**。SentencePiece 不参与模型 token ID 编码，只在预训练阶段为整组和连续跨度掩码提供词/子词边界指导。
 
-预训练使用约 **1.638B 个有效不重复字符 token**，通过前后两组错位窗口形成约 **3.276B 字符 token 的训练暴露量**。最终固定验证 MLM loss 为 **1.9900**、masked accuracy 为 **60.76%**。此外，本报告记录一个小型“的/地/得”纠错微调实验，用于说明 HCAM 作为下游中文编码器基座的可适配性；该实验不是本次开源的核心任务。
+预训练语料约包含 **1.638B 个有效不重复字符 token**。训练被划分为 **10 个 virtual epochs**：前 5 个 virtual epochs 合计完成第一遍完整语料，后 5 个使用半窗口 offset 并合计完成第二遍完整语料。因此总训练暴露量约为 **3.276B character-token exposures**。virtual epoch 只是训练调度与 masking/LR 阶段单位，并不等同于一次完整语料遍历。最终固定验证 MLM loss 为 **1.9900**、masked accuracy 为 **60.76%**。在额外真实文本基准中，HCAM 的 REAL-MLM Top-5 达到 **88.38%**，与 Chinese-RoBERTa-WWM-ext 的 88.50% 接近；REAL-LONG 中远距离 Cue 帮助率达到 **95.00%**。这些结果表明，即使多数层使用门控扩张卷积而非全局自注意力，HCAM 仍然建立了明确的普通 MLM 与数百字级远距离上下文利用能力。
+
+此外，本报告记录一个小型“的/地/得”纠错微调实验，用于说明 HCAM 作为下游中文编码器基座的可适配性；该实验不是本次开源的核心任务。
 
 ### 项目缘起
 
@@ -99,7 +101,7 @@ SentencePiece 只作为边界指导：识别字符组、提供整组 mask 边界
 
 ### 3. 预训练数据与优化
 
-预训练有效数据规模约 1.638B 字符。前 5 轮使用第一组窗口，后 5 轮使用错位后的第二组窗口，使相同原文在不同上下文边界下再次暴露，总训练暴露量约 3.276B 字符 token。固定验证集约 1M 字符 token。
+预训练有效不重复语料规模约为 **1.638B 字符**。完整训练实际包含 **2 次全语料遍历**，但为了动态 masking、学习率调度、验证和断点续训，被进一步切分为 10 个 virtual epochs：第 1–5 个 virtual epochs 合起来覆盖第一遍完整语料；第 6–10 个使用半窗口 offset，合起来覆盖第二遍完整语料。因此总训练暴露量约为 **3.276B 字符 token**。固定验证集约 1M 字符 token。
 
 目标数据混合比例：Ultra-FineWeb 中文 ≤50%、SkyPile-150B 中文 32%、Wikipedia 14%、自有/用户语料 4%。当 Ultra-FineWeb 或 Wikipedia 不足目标量时，缺口由 SkyPile 回补，而不是重复较早文本。仓库不重新分发原始训练语料；详见 `DATA_LICENSES.md`。
 
@@ -137,6 +139,48 @@ SentencePiece 只作为边界指导：识别字符组、提供整组 mask 边界
 
 这里的 PPL 是 masked cross-entropy 的指数，只适合同一词表和同一评测定义下观察，不应直接与不同 tokenizer 的 BERT/RoBERTa/MacBERT PPL 横向比较。
 
+#### 4.1 真实文本 MLM、稀有跨度与长距离依赖测试
+
+为了进一步观察模型在真实文本中的掩码恢复以及远距离上下文利用能力，我额外构造了 REAL-MLM、REAL-RARE-SPAN 和 REAL-LONG 三组测试，并使用 Chinese-RoBERTa-WWM-ext 与 RoFormerV2-Char-Base 作为参考基线。
+
+| 模型 | 参数量 | REAL-MLM Top-1 | REAL-MLM Top-5 | Rare 字符 Top-1 | Rare 整词恢复 |
+|---|---:|---:|---:|---:|---:|
+| **HCAM-100M** | 102.78M | **68.50%** | **88.38%** | 9.79% | 1.33% |
+| Chinese-RoBERTa-WWM-ext | 102.29M | 74.00% | 88.50% | 19.71% | 4.33% |
+| RoFormerV2-Char-Base | 94.18M | 38.38% | 61.00% | 17.02% | 4.67% |
+
+HCAM 的 REAL-MLM Top-5 为 **88.38%**，与 Chinese-RoBERTa-WWM-ext 的 **88.50%** 仅相差 0.12 个百分点。虽然 HCAM 的 Top-1、Rare Span 和整词恢复仍有提升空间，但这一结果说明，在普通真实文本 MLM 中，HCAM 已经能够较稳定地把正确答案放入高概率候选集合。
+
+REAL-LONG 则对远距离实体线索进行删除消融。四个距离桶（64–469 字）简单平均结果如下：
+
+| 模型 | 完整 Top-1 | 去 Cue Top-1 | 完整整词 | Cue 帮助率 | 平均 ΔlogP |
+|---|---:|---:|---:|---:|---:|
+| **HCAM-100M** | 46.54% | 13.32% | 32.50% | **95.00%** | **+2.467** |
+| Chinese-RoBERTa-WWM-ext | 58.54% | 22.87% | 45.63% | 96.25% | +2.296 |
+| RoFormerV2-Char-Base | 60.09% | 20.55% | 45.00% | 95.63% | +2.574 |
+
+在最远的 **384–469 字**距离桶中，HCAM 保留远端 Cue 时 Top-1 为 **42.45%**，删除 Cue 后降至 **10.38%**，平均 `ΔlogP=+2.441`。这说明三层全局 Gated-GQA 已经能够让数百字外的信息稳定进入并影响目标位置表示。HCAM 当前的主要差距并不是“长距离信息无法传递”。
+
+从结构上看，HCAM 的信息流大致是：
+
+```text
+local → local → GLOBAL
+→ local → local → local → GLOBAL
+→ local → local → GLOBAL
+```
+
+一次全局注意力将远端信息写入 hidden state 后，这些信息会通过残差连接继续保留，并在后续局部门控扩张卷积中被加工；下一次全局层再进行新的全序列信息交换。因此，“只有三层全局注意力”并不等于“只有三层拥有全局信息”。REAL-LONG 的 Cue 消融为这一点提供了直接实验证据。
+
+这里必须强调训练资源并不匹配。HCAM 是从零训练模型，所使用的**有效不重复语料规模约为 1.638B 字符**；10 个 virtual epochs 实际只对应 **2 次完整语料遍历**，总训练暴露量约为 **3.276B character-token exposures**。HFL 官方资料记录 Chinese-RoBERTa-WWM-ext 所用 EXT 语料总词数约 **5.4B**；RoFormerV2 官方则记录约 **280GB 无监督数据**，并追加约 **20GB、77 个标注数据集构造的 92 个任务**进行有监督多任务训练。字符、词与 GB 不能直接一一换算，因此这里不声明一个不严谨的精确倍数，但公开训练资源的规模显然不在同一水平。
+
+**在明显更小的训练数据与个人算力预算下，HCAM 仍在普通真实文本 MLM 和长距离上下文利用上达到了相对于这些成熟基线并不弱、部分指标处于同一量级的能力。** REAL-MLM Top-5 与 Chinese-RoBERTa-WWM-ext 几乎持平，而 REAL-LONG 的 Cue 帮助率也与两个成熟基线接近。
+
+Rare Span 与最终精确恢复率仍有差距，但这类能力高度依赖长尾词、专名与低频组合的覆盖次数，因此其中相当一部分差距很可能来自训练数据规模、数据覆盖度和训练预算，而不能直接归因于 HCAM 的混合结构。
+
+结合此前自回归缩放实验、当前 MLM 结果以及 REAL-LONG 的 Cue 消融，**目前没有发现 HCAM 相比纯 Transformer 存在可明确归因于混合架构本身的系统性性能差异或明显精度损失。** 现有结果没有显示“用门控扩张卷积替换大部分全局注意力层”本身造成了明显能力退化。严格验证架构差异仍需要未来进行同数据、同参数量、同训练步数的控制实验。
+
+完整测试方法、RoFormerV2 健康检查、各距离桶结果与更详细解释见 [`REAL_BENCHMARK.md`](REAL_BENCHMARK.md)。
+
 ### 5. 小型下游微调：中文“的/地/得”纠错
 
 该实验来自 Dededi 中文纠错项目，只作为基座下游适配示例。每个待判断的“的/地/得”位置在进入模型时被替换为 learned mask embedding，让 HCAM 根据左右上下文恢复正确类别。三类在 18K 词表中的 ID 为：`的=138`、`地=164`、`得=243`。部署时可以直接从 tied embedding 抽取这三行形成 3×1056 分类 head，在 FP32 下与完整 LM head 对这三个类别的 logits 数学等价。
@@ -172,8 +216,8 @@ External DEV 中 HCAM E3-EMA 的分类别 F1：的 99.143%、地 96.690%、得 9
 1. HCAM 是双向 MLM 编码器，不是自回归聊天模型。
 2. 上下文长度为 600，不属于长上下文模型。
 3. 18K 高频字符词表无法覆盖全部 Unicode，极罕见字符会回退到 `<unk>`。
-4. 只有三层全局注意力，这是效率与密集全局交互能力之间的结构折中。
-5. 词/跨度压力测试明显比标准混合遮蔽困难，连续跨度恢复仍有提升空间。
+4. 模型只有三层全局注意力，但 REAL-LONG 已确认 **400+ 字远端 Cue 能稳定影响预测**；是否会限制更复杂的多轮全局交互，仍需要同数据控制实验进一步验证。
+5. 稀有词与连续跨度恢复仍弱于成熟大语料基线；由于基线训练资源显著更大且训练流程不同，目前不能把这一差距直接归因于 HCAM 架构。
 6. 下游“的/地/得”实验不等于 CLUE、NER、阅读理解等通用中文 benchmark。
 7. 训练数据来自多个上游来源，各自许可不同；本项目不重新分发原始数据，模型权重许可也不能消除第三方上游条款。
 
@@ -187,7 +231,9 @@ HCAM 100M is a bidirectional Chinese masked language model built around a **hybr
 
 The model uses a true **18,000-token character vocabulary**, hidden size 1056, context length 600, and contains **102,778,220 unique trainable parameters**. SentencePiece IDs are never fed to the model; SentencePiece is used only as a word/subword-boundary guide when constructing whole-group and adjacent-group span masks during pretraining.
 
-Pretraining uses approximately **1.638B effective non-duplicate character tokens** and two offset window passes, for about **3.276B character-token exposures**. The final fixed validation MLM loss is **1.9900** with **60.76% masked accuracy**. A small Chinese 的/地/得 correction fine-tuning experiment is also reported as a downstream case study, but it is not the primary objective of this release.
+Pretraining uses approximately **1.638B effective non-duplicate character tokens**. Training is divided into **10 virtual epochs**, but they represent only **two full corpus passes**: virtual epochs 1–5 together cover the first pass, while 6–10 use a half-window offset and together cover the second. Total training exposure is therefore about **3.276B character tokens**. A virtual epoch is a scheduling segment, not a full corpus traversal. The final fixed validation MLM loss is **1.9900** with **60.76% masked accuracy**. On the additional real-text benchmark, HCAM reaches **88.38% REAL-MLM Top-5** and a **95.00% long-range cue-help rate**, providing direct evidence that the hybrid encoder retains strong ordinary MLM and long-distance context utilization despite using global attention in only three layers.
+
+A small Chinese 的/地/得 correction fine-tuning experiment is also reported as a downstream case study, but it is not the primary objective of this release.
 
 ### Motivation
 
@@ -246,7 +292,7 @@ The overall mask ratio anneals from about 30% in epoch 1 to 15% in epoch 10. Sel
 
 ### 3. Pretraining data and optimization
 
-The effective training corpus contains about 1.638B characters. The first five virtual epochs use one window alignment and the final five use an offset alignment, producing about 3.276B character-token exposures. The fixed validation stream contains about 1M character tokens.
+The effective non-duplicate training corpus contains about **1.638B characters**. The full run makes **two complete passes** over the corpus, split into 10 virtual epochs for masking/LR scheduling, validation, and checkpointing. Virtual epochs 1–5 jointly cover the first pass; virtual epochs 6–10 use a half-window offset and jointly cover the second. Total training exposure is therefore about **3.276B character tokens**. The fixed validation stream contains about 1M character tokens.
 
 The target source mixture is ≤50% Ultra-FineWeb Chinese, 32% SkyPile-150B Chinese, 14% Wikipedia, and 4% custom/user corpus. Shortfalls in Ultra-FineWeb or Wikipedia were filled from SkyPile instead of repeating earlier text. Raw corpora are not redistributed; see `DATA_LICENSES.md`.
 
@@ -261,6 +307,38 @@ Optimization uses AdamW, peak LR `7e-4`, 4% token-based warmup, cosine decay, we
 | Whole-piece/span stress benchmark | 3.0540 | 21.20 | 43.87% | 59.49% |
 
 Masked PPL is `exp(masked cross-entropy)` and is meaningful only under compatible tokenizer and masking definitions.
+
+### 4.1 Real-text MLM, rare-span and long-range evaluation
+
+The additional benchmark uses REAL-MLM, REAL-RARE-SPAN and REAL-LONG, with Chinese-RoBERTa-WWM-ext and RoFormerV2-Char-Base as reference baselines.
+
+| Model | Params | REAL-MLM Top-1 | REAL-MLM Top-5 | Rare char Top-1 | Rare whole-span |
+|---|---:|---:|---:|---:|---:|
+| **HCAM-100M** | 102.78M | **68.50%** | **88.38%** | 9.79% | 1.33% |
+| Chinese-RoBERTa-WWM-ext | 102.29M | 74.00% | 88.50% | 19.71% | 4.33% |
+| RoFormerV2-Char-Base | 94.18M | 38.38% | 61.00% | 17.02% | 4.67% |
+
+HCAM reaches **88.38% Top-5** on REAL-MLM, only **0.12 percentage points** below Chinese-RoBERTa-WWM-ext at 88.50%.
+
+REAL-LONG removes distant entity cues and re-evaluates the same prediction. Averaged across the four distance buckets (64–469 Chinese characters):
+
+| Model | Full Top-1 | No-cue Top-1 | Whole-span | Cue help rate | Mean ΔlogP |
+|---|---:|---:|---:|---:|---:|
+| **HCAM-100M** | 46.54% | 13.32% | 32.50% | **95.00%** | **+2.467** |
+| Chinese-RoBERTa-WWM-ext | 58.54% | 22.87% | 45.63% | 96.25% | +2.296 |
+| RoFormerV2-Char-Base | 60.09% | 20.55% | 45.00% | 95.63% | +2.574 |
+
+In the **384–469-character** bucket, removing the distant cue reduces HCAM Top-1 from **42.45% to 10.38%**, with mean `ΔlogP=+2.441`. This is direct evidence that distant context is genuinely used rather than merely available in principle.
+
+The hybrid encoder alternates local processing and global communication. Once a Gated-GQA block writes distant information into a token representation, residual connections allow it to persist and local convolutional layers can refine that representation before the next global exchange. Therefore, having only three global-attention layers does not mean that global information exists only inside those three layers.
+
+These comparisons are **not** matched-data architectural ablations. HCAM was trained from scratch on about **1.638B effective non-duplicate characters** and made **two full corpus passes**, split into 10 virtual epochs, for about **3.276B character-token exposures** in total. HFL documents roughly **5.4B words** for the EXT corpus, while the RoFormerV2 authors report roughly **280GB of unsupervised data** followed by about **20GB of supervised multi-task data** built from 77 labeled datasets and 92 tasks. These units are not directly interchangeable; corpus-coverage comparisons should primarily use the independent corpus scale rather than repeated-epoch exposure, and the published training resources remain clearly unmatched.
+
+**Despite substantially smaller training data and an individual-scale compute budget, HCAM still achieves real-text MLM and long-range context utilization that are not weak relative to these mature baselines, with several metrics in the same range.** The remaining gaps, particularly on rare-span and exact recovery, are strongly confounded by long-tail corpus coverage and training scale.
+
+Across the existing autoregressive scaling experiments, MLM evaluation, and REAL-LONG cue ablation, **no systematic performance degradation has yet been identified that can be clearly attributed to the hybrid convolution-attention architecture itself**. The current evidence does not show that replacing most attention layers with gated dilated convolutions inherently causes a meaningful loss of capability. A strict architectural conclusion would require a future matched-data, matched-parameter, matched-step ablation.
+
+Full definitions, RoFormerV2 health checks, and per-distance results are provided in [`REAL_BENCHMARK.md`](REAL_BENCHMARK.md).
 
 ### 5. Small downstream fine-tuning case study: 的 / 地 / 得
 
@@ -289,8 +367,8 @@ This screenshot is intended to demonstrate that the downstream HCAM model has be
 1. HCAM is a bidirectional MLM encoder, not an autoregressive chat model.
 2. Context length is 600.
 3. The 18K vocabulary does not cover every Unicode character.
-4. Only three layers use global attention, trading dense global interaction for efficiency.
-5. Whole-piece/span masking remains much harder than standard mixed masking.
+4. Only three layers use global attention, but REAL-LONG confirms that **400+ character distant cues reliably affect predictions**; whether this limits more complex multi-step global interaction still requires matched-data evaluation.
+5. Rare-word and contiguous-span recovery remains below mature large-corpus baselines; because the training resources and training procedures are substantially unmatched, this gap cannot currently be attributed directly to the HCAM architecture.
 6. The 的/地/得 case study is not a general Chinese benchmark.
 7. Training sources have heterogeneous upstream licenses. This repository does not redistribute raw corpora, and the model-weight license does not erase third-party terms.
 

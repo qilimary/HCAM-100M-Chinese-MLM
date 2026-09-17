@@ -64,10 +64,10 @@ Token Embedding + learned Mask Embedding
 
 ## 预训练 / Pretraining
 
-- 有效不重复训练字符：约 **1.638B** / ~**1.638B** effective unique training characters
-- 两组错位窗口总训练暴露量：约 **3.276B** character-token exposures
+- 有效不重复训练语料：约 **1.638B 字符** / ~**1.638B effective non-duplicate characters**
+- 训练调度：**10 个 virtual epochs**；前 5 个合计完成第一遍完整语料，后 5 个使用半窗口 offset 并合计完成第二遍完整语料
+- 总训练暴露量：约 **3.276B character-token exposures**（约等于 1.638B × 2；virtual epoch 是调度/分段单位，不等于一次完整数据遍历）
 - 固定验证集：**1M** character tokens
-- 虚拟训练轮数：10
 - 有效全局 batch：384
 - Peak LR：`7e-4`
 - Weight decay：`0.08`
@@ -114,7 +114,7 @@ REAL-LONG 四个距离桶（64–469 字）简单平均：
 
 HCAM 的绝对恢复率仍有提升空间，但它的远距离 Cue 帮助率与 `ΔlogP` 已与两种成熟基线处于相近量级。在最远的 **384–469 字**距离桶中，删除远端 Cue 会使 HCAM Top-1 从 **42.45%** 降到 **10.38%**，平均 `ΔlogP=+2.441`。这说明三层全局 Gated-GQA 已经能够让数百字之外的信息稳定影响目标位置；当前结果并不支持“多数层换成卷积后，模型失去了长距离上下文能力”这一判断。
 
-这里需要特别说明：这不是同数据、同训练预算的架构消融。HCAM 从零训练使用约 **1.638B 个有效不重复字符**（约 **3.276B character-token exposures**）；HFL 官方文档记录 Chinese-RoBERTa-WWM-ext 所用 EXT 语料总词数约 **5.4B**；RoFormerV2 官方文档记录约 **280GB 无监督数据**，随后还有约 **20GB、77 个标注数据集构成的 92 个任务**进行有监督多任务训练。字符、词和 GB 不能直接一一换算，因此这里不计算一个虚假的“数据倍数”，但公开训练资源的规模明显并不匹配。
+这里需要特别说明：这不是同数据、同训练预算的架构消融。HCAM 从零训练所使用的**有效不重复语料规模约为 1.638B 字符**；训练被划分为 10 个 virtual epochs，但它们只是两遍完整语料中的分段调度单位：前 5 个合计完成第一遍，后 5 个使用半窗口 offset 并合计完成第二遍，因此总训练暴露量约为 **3.276B character-token exposures**。HFL 官方文档记录 Chinese-RoBERTa-WWM-ext 所用 EXT 语料总词数约 **5.4B**；RoFormerV2 官方文档记录约 **280GB 无监督数据**，随后还有约 **20GB、77 个标注数据集构成的 92 个任务**进行有监督多任务训练。字符、词和 GB 不能直接一一换算，因此这里不计算一个虚假的“数据倍数”，但公开训练资源规模明显并不匹配。
 
 **在明显更小的训练数据与个人训练预算下，HCAM 仍在普通真实文本 MLM 和长距离上下文利用上达到了相对于这些成熟基线并不弱、部分指标处于同一量级的能力。** 例如 REAL-MLM Top-5 为 **88.38%**，与 Chinese-RoBERTa-WWM-ext 的 **88.50%** 仅差 0.12 个百分点；REAL-LONG Cue 帮助率为 **95.00%**，也与两种成熟基线接近。
 
@@ -126,7 +126,7 @@ In the additional real-text benchmark, HCAM reaches **68.50% Top-1 / 88.38% Top-
 
 On REAL-LONG, HCAM achieves a **95.00% cue-help rate** and mean **ΔlogP +2.467**, comparable in scale to Chinese-RoBERTa-WWM-ext (96.25%, +2.296) and RoFormerV2-Char-Base (95.63%, +2.574). In the 384–469-character bucket, removing the distant cue reduces HCAM Top-1 from **42.45% to 10.38%**, providing direct evidence that distant context is genuinely used.
 
-These are not matched-data architectural ablations. HCAM was trained from scratch on about **1.638B effective non-duplicate characters** (~3.276B character-token exposures), whereas HFL documents roughly **5.4B words** for its EXT corpus and the RoFormerV2 authors report about **280GB of unsupervised data** followed by roughly **20GB of supervised multi-task data**. The units are not directly interchangeable, but the published training-resource scales are clearly unmatched.
+These are not matched-data architectural ablations. HCAM was trained from scratch on about **1.638B effective non-duplicate characters**. Training is divided into **10 virtual epochs**, but these are scheduling segments rather than ten full corpus passes: virtual epochs 1–5 together cover the first full pass, while 6–10 use a half-window offset and together cover the second full pass, for about **3.276B character-token exposures** in total. HFL documents roughly **5.4B words** for its EXT corpus, while the RoFormerV2 authors report about **280GB of unsupervised data** followed by roughly **20GB of supervised multi-task data**. The units are not directly interchangeable, and the published training resources remain clearly unmatched.
 
 **Despite substantially smaller training data and an individual-scale compute budget, HCAM still achieves real-text MLM and long-range context utilization that are not weak relative to these mature baselines, with several metrics in the same range.** The remaining gaps—especially rare-span recovery—are strongly confounded by long-tail coverage and training scale.
 
