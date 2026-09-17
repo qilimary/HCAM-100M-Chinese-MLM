@@ -11,17 +11,15 @@ HCAM 100M is a **102.78M-parameter** bidirectional Chinese masked language model
 
 ## 项目缘起 / Motivation
 
-HCAM 100M 最初并不是为了超越某个现有模型而训练的。这个项目来自作者长期对小型语言模型架构、从零训练流程，以及卷积与注意力混合结构的兴趣。在训练 HCAM 100M 之前，同一条架构思路已经被作者逐步用于 **16M、30M、55M 和 100M** 规模的自回归语言模型实验。
+HCAM 100M 最初并不是为了超越某个现有模型而训练的。我不是科班出身，但我一直对语言模型有浓厚的兴趣。这个项目来自我长期对语言模型架构、从零训练流程，以及卷积与注意力混合结构的兴趣。之前我训练过许多模型 给我积累了不少经验。在训练 HCAM 100M 之前，我设计的这个架构思路已经分别在 **16M、30M、55M 和 100M** 规模的自回归语言模型实验。参数和数据等比例增长，模型均能够正常收敛，并且未发现性能显著低于Transformer的情况。
 
-在这些自回归实验之后，作者开始关注同一类混合卷积-注意力结构在**双向掩码语言建模**中的表现，于是重新设计了预训练目标、动态多粒度掩码策略、字符级 tokenizer 与训练流程，并最终从零训练出 HCAM 100M。
+在这些自回归实验之后，我开始关注这个混合卷积-注意力结构在**双向掩码语言建模**中的表现，于是在AI的帮助下重新设计了预训练目标、动态多粒度掩码策略、字符级 tokenizer 与训练流程，并最终从零训练出 HCAM 100M。
 
-项目一开始只是一个个人研究实验，并没有预设必须达到怎样的下游成绩，也没有计划把模型部署到手机端。后续在中文“的 / 地 / 得”纠错任务上的微调结果超出了最初预期，才进一步推动了模型压缩、量化以及 Android 端部署。也正因为这条从架构实验、预训练、下游微调一直走到真实应用的路径，作者决定将 HCAM 100M 的预训练基座、架构实现、训练方法与实验结果公开。
+项目一开始只是出于个人兴趣和想法，并没有预设必须达到怎样的下游成绩，甚至一开始我对该模型的能力是偏悲观的，也没有计划把模型部署到手机端。后续在中文“的 / 地 / 得”纠错任务上的微调结果超出了最初预期，才进一步推动了模型压缩、量化以及 Android 端部署。也正因为这条从架构实验、预训练、下游微调一直走到真实应用的路径，我决定将 HCAM 100M 的预训练基座、架构实现、训练方法与实验结果公开。
 
-HCAM 100M was not originally trained with the goal of outperforming a particular existing model. The project grew out of the author's long-standing interest in small language-model architectures, training models from scratch, and hybrid convolution-attention designs. Before HCAM 100M, the same architectural line had already been explored through autoregressive models at **16M, 30M, 55M, and 100M** scales.
-
-After those autoregressive experiments, the author wanted to see how the same hybrid convolution-attention idea would behave under **bidirectional masked language modeling**. This led to a redesigned pretraining objective, dynamic multi-granularity masking strategy, character-level tokenizer, and training pipeline, eventually resulting in HCAM 100M.
-
-The project began simply as a personal research experiment, without a predefined downstream target or a plan for mobile deployment. Later, its fine-tuning results on Chinese 的/地/得 correction exceeded the author's initial expectations, which led to further work on compression, quantization, and Android deployment. That progression—from architecture experiments to pretraining, downstream adaptation, and practical deployment—is one of the main reasons the HCAM 100M base model, architecture, training recipe, and evaluation results are being released publicly.
+HCAM 100M was not originally trained with the goal of outperforming any particular existing model. I do not come from a formal computer science or machine learning background, but I have long had a strong interest in language models. This project grew out of my sustained interest in language-model architectures, training models from scratch, and hybrid convolution-attention designs. Before training HCAM 100M, I had already trained a number of models and accumulated a fair amount of practical experience. The same architectural idea behind HCAM had previously been explored in autoregressive language models at 16M, 30M, 55M, and 100M parameter scales. As both model size and training data were increased roughly proportionally, all of these models were able to converge normally, and I did not observe performance that was clearly and consistently worse than comparable Transformer-based designs.
+After those autoregressive experiments, I became interested in how this hybrid convolution-attention architecture would behave under bidirectional masked language modeling. With the help of AI, I redesigned the pretraining objective, dynamic multi-granularity masking strategy, character-level tokenizer, and training pipeline, and eventually trained HCAM 100M from scratch.
+The project initially began purely out of personal interest and curiosity. I did not set a predefined downstream performance target, and in fact I was somewhat pessimistic about the model's capabilities at first. I also had no original plan to deploy it on a mobile device. Later, its fine-tuning results on Chinese 的/地/得 correction exceeded my initial expectations, which led to further work on model compression, quantization, and Android deployment. It was this progression—from architecture experiments, to pretraining, to downstream fine-tuning, and eventually to a real-world application—that ultimately led me to release the HCAM 100M pretrained base model, architecture implementation, training method, and experimental results publicly.
 
 ## 核心规格 / Key specifications
 
@@ -119,6 +117,7 @@ HCAM 100M 的预训练基座已经被进一步微调用于中文“的 / 地 / �
 The HCAM 100M pretrained base has also been fine-tuned for Chinese 的/地/得 correction and integrated into the author's Android application.
 
 下图为一次真实运行示例。专业模式由 HCAM 下游微调模型负责“的 / 地 / 得”判断。此次示例中，模型在约 1,187 字文本中给出了 3 条纠错建议，并显示对应置信度。截图中的 Android 端实际运行的是**量化后的 ExecuTorch/XNNPACK 部署版本**，并非 392 MiB 的 FP32 预训练基座；部署模型采用 dynamic INT8 per-channel 主干量化，并保留 FP32 三分类输出头。
+（后面发现在一万字左右的推理速度约5秒）
 
 The screenshot below shows a real application run. In Professional (HCAM) mode, the downstream HCAM model performs 的/地/得 classification and provides confidence scores for its correction suggestions. The Android app shown here runs a **quantized ExecuTorch/XNNPACK deployment build**, not the 392 MiB FP32 pretrained base; the deployment uses dynamic INT8 per-channel quantization for the main quantized operators while keeping the final three-class head in FP32.
 
