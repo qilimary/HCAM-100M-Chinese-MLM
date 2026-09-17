@@ -98,6 +98,23 @@ The first HCAM E3-EMA fine-tune masks every target 的/地/得 position with the
 
 These results are task-specific and are **not** a claim that HCAM is universally superior to RoFormerV2. Natural DEV3 contains 600 snippets from DRCD-dev and 600 from Wikipedia, with target counts 的 2268 / 地 333 / 得 133.
 
+## 实际应用示例 / Real-world Application Demo
+
+HCAM 100M 的预训练基座已经被进一步微调用于中文“的 / 地 / 得”纠错，并集成到作者的 Android 应用中。
+
+The HCAM 100M pretrained base has also been fine-tuned for Chinese 的/地/得 correction and integrated into the author's Android application.
+
+下图为一次真实运行示例。专业模式由 HCAM 下游微调模型负责“的 / 地 / 得”判断。此次示例中，模型在约 1,187 字文本中给出了 3 条纠错建议，并显示对应置信度。
+
+The screenshot below shows a real application run. In Professional (HCAM) mode, the downstream HCAM model performs 的/地/得 classification and provides confidence scores for its correction suggestions.
+
+![HCAM downstream application demo](app_demo.jpg)
+
+> **说明 / Note:**  
+> 本仓库的主要开源对象仍是 **HCAM 100M 预训练基座**。截图展示的是一个下游微调和移动端部署案例，并非独立基准测试。界面所示耗时取自一次实际设备运行，不代表所有设备的固定推理速度。  
+>  
+> The primary release of this repository remains the **HCAM 100M pretrained base model**. The screenshot is a downstream fine-tuning and mobile deployment example, not a standalone benchmark. The displayed latency is from one real-device run and should not be interpreted as a fixed speed across devices.
+
 更多细节见 [`REPORT_HCAM.md`](REPORT_HCAM.md)。
 
 ## 下载权重 / Download weights
