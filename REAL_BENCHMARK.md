@@ -100,7 +100,7 @@ The encoder alternates local processing and global communication. Once a global-
 1. **HCAM 的普通真实文本 MLM 能力并不弱。** 在参数量相近的情况下，REAL-MLM Top-5 已与 Chinese-RoBERTa-WWM-ext 基本持平。
 2. **HCAM 已建立明确的长距离上下文利用能力。** 400 字以上的远端 Cue 仍能显著改变预测，Cue 帮助率与两个成熟 Transformer 基线接近。
 3. **当前更明显的短板是 Rare Span 与最终精确恢复率，而不是远距离信息“传不过来”。**
-4. **在明显更小的训练数据与个人训练预算下，HCAM 仍表现出了相对于成熟基线并不弱的普通 MLM 与长距离上下文能力。** REAL-MLM Top-5 与 Chinese-RoBERTa-WWM-ext 几乎持平，REAL-LONG 的 Cue 帮助率也与两个成熟基线处于同一量级。
+4. **在明显更小的训练数据与个人训练预算下，HCAM 仍表现出了相对于成熟基线并不弱的普通 MLM 与长距离上下文能力。** REAL-MLM Top-5 与 Chinese-RoBERTa-WWM-ext 几乎持平，REAL-LONG 的 Cue 帮助率也与两个成熟基线处于同一量级；这说明小规模个人训练并没有阻止 HCAM 建立具有竞争力的上下文表示能力。
 5. **训练数据规模与覆盖度很可能贡献了相当一部分剩余绝对分数差距。** HCAM 与两个基线并非同数据、同训练预算；尤其 Rare/实体恢复高度依赖长尾语料覆盖。
 6. **在目前已有的自回归缩放实验、MLM 结果与 REAL-LONG 测试中，没有发现 HCAM 相比纯 Transformer 存在可明确归因于混合架构本身的系统性性能退化。** 当前绝对分数差距不应直接写成“卷积替换注意力导致的精度损失”。要严格区分架构效果，仍需要未来进行同数据、同参数量、同训练步数的控制实验。
 
