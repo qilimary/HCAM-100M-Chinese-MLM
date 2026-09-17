@@ -9,6 +9,20 @@ HCAM 100M is a **102.78M-parameter** bidirectional Chinese masked language model
 > 本仓库的主体是预训练基座。Dededi“的/地/得”微调仅作为一个小型下游实验。  
 > The pretrained base is the main release. The Dededi 的/地/得 correction fine-tune is included only as a small downstream case study.
 
+## 项目缘起 / Motivation
+
+HCAM 100M 最初并不是为了超越某个现有模型而训练的。这个项目来自作者长期对小型语言模型架构、从零训练流程，以及卷积与注意力混合结构的兴趣。在训练 HCAM 100M 之前，同一条架构思路已经被作者逐步用于 **16M、30M、55M 和 100M** 规模的自回归语言模型实验。
+
+在这些自回归实验之后，作者开始关注同一类混合卷积-注意力结构在**双向掩码语言建模**中的表现，于是重新设计了预训练目标、动态多粒度掩码策略、字符级 tokenizer 与训练流程，并最终从零训练出 HCAM 100M。
+
+项目一开始只是一个个人研究实验，并没有预设必须达到怎样的下游成绩，也没有计划把模型部署到手机端。后续在中文“的 / 地 / 得”纠错任务上的微调结果超出了最初预期，才进一步推动了模型压缩、量化以及 Android 端部署。也正因为这条从架构实验、预训练、下游微调一直走到真实应用的路径，作者决定将 HCAM 100M 的预训练基座、架构实现、训练方法与实验结果公开。
+
+HCAM 100M was not originally trained with the goal of outperforming a particular existing model. The project grew out of the author's long-standing interest in small language-model architectures, training models from scratch, and hybrid convolution-attention designs. Before HCAM 100M, the same architectural line had already been explored through autoregressive models at **16M, 30M, 55M, and 100M** scales.
+
+After those autoregressive experiments, the author wanted to see how the same hybrid convolution-attention idea would behave under **bidirectional masked language modeling**. This led to a redesigned pretraining objective, dynamic multi-granularity masking strategy, character-level tokenizer, and training pipeline, eventually resulting in HCAM 100M.
+
+The project began simply as a personal research experiment, without a predefined downstream target or a plan for mobile deployment. Later, its fine-tuning results on Chinese 的/地/得 correction exceeded the author's initial expectations, which led to further work on compression, quantization, and Android deployment. That progression—from architecture experiments to pretraining, downstream adaptation, and practical deployment—is one of the main reasons the HCAM 100M base model, architecture, training recipe, and evaluation results are being released publicly.
+
 ## 核心规格 / Key specifications
 
 | 项目 / Item | 配置 / Value |
@@ -104,9 +118,9 @@ HCAM 100M 的预训练基座已经被进一步微调用于中文“的 / 地 / �
 
 The HCAM 100M pretrained base has also been fine-tuned for Chinese 的/地/得 correction and integrated into the author's Android application.
 
-下图为一次真实运行示例。专业模式由 HCAM 下游微调模型负责“的 / 地 / 得”判断。此次示例中，模型在约 1,187 字文本中给出了 3 条纠错建议，并显示对应置信度。
+下图为一次真实运行示例。专业模式由 HCAM 下游微调模型负责“的 / 地 / 得”判断。此次示例中，模型在约 1,187 字文本中给出了 3 条纠错建议，并显示对应置信度。截图中的 Android 端实际运行的是**量化后的 ExecuTorch/XNNPACK 部署版本**，并非 392 MiB 的 FP32 预训练基座；部署模型采用 dynamic INT8 per-channel 主干量化，并保留 FP32 三分类输出头。
 
-The screenshot below shows a real application run. In Professional (HCAM) mode, the downstream HCAM model performs 的/地/得 classification and provides confidence scores for its correction suggestions.
+The screenshot below shows a real application run. In Professional (HCAM) mode, the downstream HCAM model performs 的/地/得 classification and provides confidence scores for its correction suggestions. The Android app shown here runs a **quantized ExecuTorch/XNNPACK deployment build**, not the 392 MiB FP32 pretrained base; the deployment uses dynamic INT8 per-channel quantization for the main quantized operators while keeping the final three-class head in FP32.
 
 ![HCAM downstream application demo](app_demo.jpg)
 

@@ -14,6 +14,12 @@ HCAM 100M 是一个面向中文文本的双向掩码语言模型（MLM）。模�
 
 预训练使用约 **1.638B 个有效不重复字符 token**，通过前后两组错位窗口形成约 **3.276B 字符 token 的训练暴露量**。最终固定验证 MLM loss 为 **1.9900**、masked accuracy 为 **60.76%**。此外，本报告记录一个小型“的/地/得”纠错微调实验，用于说明 HCAM 作为下游中文编码器基座的可适配性；该实验不是本次开源的核心任务。
 
+### 项目缘起
+
+HCAM 100M 的起点并不是“为了超过某个现有模型”，而是作者对小型语言模型架构和从零训练过程的持续兴趣。在 HCAM 100M 之前，同一条混合卷积-注意力架构思路已经先后被用于 16M、30M、55M 和 100M 规模的自回归语言模型实验。
+
+在完成这些实验后，作者希望验证同一类结构在双向掩码语言建模中的表现，因此重新设计了预训练目标、字符级 tokenizer、动态多粒度 masking 和训练流程，并从零训练了 HCAM 100M。项目最初没有预设下游目标，也没有计划进行移动端部署；后续在“的/地/得”纠错任务上的微调结果超出最初预期，才进一步发展出量化和 Android 端部署。这个从架构实验到真实应用的演进过程，也是本次公开预训练基座和完整技术资料的主要动机之一。
+
 ### 1. 架构
 
 | 项目 | 配置 |
@@ -110,7 +116,7 @@ SentencePiece 只作为边界指导：识别字符组、提供整组 mask 边界
 | Gradient clip | 1.0 |
 | Effective global batch | 384 |
 
-训练使用自动混合精度、PyTorch SDPA，并支持双 GPU DDP；主要训练环境为 Kaggle T4×2。
+训练使用自动混合精度、PyTorch SDPA，并支持双 GPU DDP；主要训练环境为 Kaggle T4×2。由于 Kaggle 单次 GPU 会话时长受限，完整 10 轮预训练并不是在一次连续会话中完成，而是跨多次、跨数天断点续训完成。训练过程在安全边界保存 `last.pt`，并在下一次会话恢复模型参数、AdamW 优化器状态、GradScaler、轮次/步数、学习率相关状态以及训练签名；续训包还进行 CRC / SHA256 等完整性校验，以尽量保证会话切换前后的训练连续性。换言之，报告中的 10 轮代表同一训练轨迹的连续恢复，而不是每天重新开始训练。
 
 ### 4. 预训练结果
 
@@ -157,7 +163,7 @@ External DEV 中 HCAM E3-EMA 的分类别 F1：的 99.143%、地 96.690%、得 9
 
 ### 5.1 实际应用部署示例
 
-除受控评测外，HCAM E3-EMA 还被集成到作者的 Android 中文纠错应用中，用于真实文本环境下的交互式测试。README 中展示了一次实际设备运行截图：在“专业（HCAM）”模式下，应用对约 1,187 字文本给出 3 条“的/地/得”纠错建议，并显示对应置信度；该次运行界面记录的耗时为 0.44 秒。
+除受控评测外，HCAM E3-EMA 还被集成到作者的 Android 中文纠错应用中，用于真实文本环境下的交互式测试。README 中展示了一次实际设备运行截图：在“专业（HCAM）”模式下，应用对约 1,187 字文本给出 3 条“的/地/得”纠错建议，并显示对应置信度；该次运行界面记录的耗时为 0.44 秒。截图中的实际端侧模型是 **ExecuTorch/XNNPACK 量化部署版本**，而不是 FP32 预训练基座；部署主干使用 dynamic INT8 per-channel 量化，最终三分类 head 保持 FP32。
 
 这一截图用于说明 HCAM 下游模型已经完成端侧应用集成，而不是作为独立 benchmark。实际速度会受到设备、文本长度、运行时状态和部署实现等因素影响，因此界面中的单次耗时不应视为所有设备上的固定推理速度。本仓库的主要开源对象仍然是 **HCAM 100M 预训练基座**，Dededi 微调模型与 Android 应用仅作为下游适配案例。
 
@@ -182,6 +188,12 @@ HCAM 100M is a bidirectional Chinese masked language model built around a **hybr
 The model uses a true **18,000-token character vocabulary**, hidden size 1056, context length 600, and contains **102,778,220 unique trainable parameters**. SentencePiece IDs are never fed to the model; SentencePiece is used only as a word/subword-boundary guide when constructing whole-group and adjacent-group span masks during pretraining.
 
 Pretraining uses approximately **1.638B effective non-duplicate character tokens** and two offset window passes, for about **3.276B character-token exposures**. The final fixed validation MLM loss is **1.9900** with **60.76% masked accuracy**. A small Chinese 的/地/得 correction fine-tuning experiment is also reported as a downstream case study, but it is not the primary objective of this release.
+
+### Motivation
+
+HCAM 100M did not begin as an attempt to outperform a particular existing model. It grew out of the author's ongoing interest in small language-model architectures and training models from scratch. Before HCAM 100M, the same hybrid convolution-attention line had already been explored through autoregressive models at 16M, 30M, 55M, and 100M scales.
+
+After those experiments, the author wanted to test how the same type of architecture would behave under bidirectional masked language modeling. This led to a redesigned pretraining objective, character-level tokenizer, dynamic multi-granularity masking strategy, and training pipeline, and ultimately to HCAM 100M. The project initially had no predefined downstream target and no plan for mobile deployment; quantization and Android deployment only followed after the 的/地/得 fine-tuning results exceeded the author's initial expectations. This progression from architecture experimentation to practical deployment is one of the motivations for releasing the pretrained base and its technical documentation.
 
 ### 1. Architecture
 
@@ -238,7 +250,7 @@ The effective training corpus contains about 1.638B characters. The first five v
 
 The target source mixture is ≤50% Ultra-FineWeb Chinese, 32% SkyPile-150B Chinese, 14% Wikipedia, and 4% custom/user corpus. Shortfalls in Ultra-FineWeb or Wikipedia were filled from SkyPile instead of repeating earlier text. Raw corpora are not redistributed; see `DATA_LICENSES.md`.
 
-Optimization uses AdamW, peak LR `7e-4`, 4% token-based warmup, cosine decay, weight decay 0.08, z-loss `1e-4`, gradient clipping 1.0, and effective global batch 384. The final epoch uses an LR floor of `1e-4`. Training primarily ran on Kaggle T4×2 with AMP, PyTorch SDPA, and DDP support.
+Optimization uses AdamW, peak LR `7e-4`, 4% token-based warmup, cosine decay, weight decay 0.08, z-loss `1e-4`, gradient clipping 1.0, and effective global batch 384. The final epoch uses an LR floor of `1e-4`. Training primarily ran on Kaggle T4×2 with AMP, PyTorch SDPA, and DDP support. Because Kaggle GPU sessions are time-limited, the full 10-epoch pretraining run was completed across multiple sessions over several days rather than in one uninterrupted job. Checkpoints preserved the model state, AdamW state, GradScaler state, epoch/step position, LR-related progress and training signature, and the resume packages were integrity-checked with CRC/SHA256 before continuing. The reported 10 epochs therefore represent one continuously resumed training trajectory, not repeated restarts from scratch.
 
 ### 4. Pretraining results
 
@@ -268,7 +280,7 @@ Scores vary substantially across distributions, and one synthetic/template-heavy
 
 ### 5.1 Practical deployment example
 
-Beyond controlled evaluation, HCAM E3-EMA has also been integrated into the author's Android Chinese correction application for interactive testing on real-world text. The README includes a real-device screenshot in which Professional (HCAM) mode processes approximately 1,187 Chinese characters and returns three 的/地/得 correction suggestions with confidence scores; the interface records 0.44 seconds for that particular run.
+Beyond controlled evaluation, HCAM E3-EMA has also been integrated into the author's Android Chinese correction application for interactive testing on real-world text. The README includes a real-device screenshot in which Professional (HCAM) mode processes approximately 1,187 Chinese characters and returns three 的/地/得 correction suggestions with confidence scores; the interface records 0.44 seconds for that particular run. The on-device model shown in the screenshot is an **ExecuTorch/XNNPACK quantized deployment build**, not the FP32 pretrained base; the deployed backbone uses dynamic INT8 per-channel quantization while the final three-class head remains FP32.
 
 This screenshot is intended to demonstrate that the downstream HCAM model has been integrated into an on-device application, not to serve as a standalone benchmark. Runtime depends on device hardware, text length, runtime state, and deployment implementation, so the displayed latency should not be interpreted as a fixed speed across devices. The primary open-source artifact of this repository remains the **HCAM 100M pretrained base model**; the Dededi fine-tune and Android application are presented only as a downstream adaptation case study.
 
