@@ -1,0 +1,61 @@
+REPORT_HCAM.md 建议同步修改
+
+一、在“### 4. 预训练结果”现有两套零微调 MLM 基准之后、进入“### 5. 小型下游微调”之前，新增：
+
+#### 4.1 真实文本 MLM、稀有跨度与长距离依赖测试
+
+为了进一步观察模型在真实文本中的掩码恢复以及远距离上下文利用能力，额外构造了 REAL-MLM、REAL-RARE-SPAN 和 REAL-LONG 三组测试，并使用 Chinese-RoBERTa-WWM-ext 与 RoFormerV2-Char-Base 作为参考基线。
+
+| 模型 | 参数量 | REAL-MLM Top-1 | REAL-MLM Top-5 | Rare 字符 Top-1 | Rare 整词恢复 |
+|---|---:|---:|---:|---:|---:|
+| **HCAM-100M** | 102.78M | **68.50%** | **88.38%** | 9.79% | 1.33% |
+| Chinese-RoBERTa-WWM-ext | 102.29M | 74.00% | 88.50% | 19.71% | 4.33% |
+| RoFormerV2-Char-Base | 94.18M | 38.38% | 61.00% | 17.02% | 4.67% |
+
+HCAM 的 REAL-MLM Top-5 为 **88.38%**，与 Chinese-RoBERTa-WWM-ext 的 **88.50%** 仅相差 0.12 个百分点。虽然 HCAM 的 Top-1、Rare Span 和整词恢复仍有提升空间，但这一结果表明，在普通真实文本 MLM 中，HCAM 已能够把正确答案稳定放入高概率候选集合。
+
+更重要的是，REAL-LONG 对远距离实体线索进行了删除消融。四个距离桶（64–469 字）简单平均结果如下：
+
+| 模型 | 完整 Top-1 | 去 Cue Top-1 | 完整整词 | Cue 帮助率 | 平均 ΔlogP |
+|---|---:|---:|---:|---:|---:|
+| **HCAM-100M** | 46.54% | 13.32% | 32.50% | **95.00%** | **+2.467** |
+| Chinese-RoBERTa-WWM-ext | 58.54% | 22.87% | 45.63% | 96.25% | +2.296 |
+| RoFormerV2-Char-Base | 60.09% | 20.55% | 45.00% | 95.63% | +2.574 |
+
+在最远的 384–469 字距离桶中，HCAM 保留远端 Cue 时 Top-1 为 **42.45%**，删除 Cue 后降至 **10.38%**，平均 `ΔlogP=+2.441`。这说明三层全局 Gated-GQA 已经能够让数百字外的信息稳定进入并影响目标位置表示，HCAM 当前的主要差距并不是“长距离信息无法传递”。
+
+这里必须强调训练资源并不匹配。HCAM 是从零训练模型，使用约 **1.638B 个有效不重复字符**，两组错位窗口合计约 **3.276B character-token exposures**；HFL 官方资料记录 Chinese-RoBERTa-WWM-ext 所用 EXT 语料总词数约 **5.4B**；RoFormerV2 官方则记录约 **280GB 无监督数据**，并追加约 **20GB、77 个标注数据集构造的 92 个任务**进行有监督多任务训练。字符、词与 GB 不能直接一一换算，因此不能据此计算精确的数据倍数，但训练数据与训练预算显然不在同一规模。
+
+**在明显更小的训练数据与个人算力预算下，HCAM 仍在普通真实文本 MLM 和长距离上下文利用上达到了相对于这些成熟基线并不弱、部分指标处于同一量级的能力。** Rare Span 与最终精确恢复率的差距很可能有相当一部分来自长尾语料覆盖、训练数据规模和训练预算，而不能直接归因于混合卷积-注意力结构。
+
+结合此前自回归缩放实验、当前 MLM 结果以及 REAL-LONG 的 Cue 消融，**目前没有发现 HCAM 相比纯 Transformer 存在可明确归因于混合架构本身的系统性性能差异或明显精度损失**。现有结果没有显示“用门控扩张卷积替换大部分全局注意力层”本身造成了明显能力退化。严格验证架构差异仍需要未来进行同数据、同参数量、同训练步数的控制实验。
+
+完整测试定义、RoFormerV2 健康检查和各距离桶结果见 [`REAL_BENCHMARK.md`](REAL_BENCHMARK.md)。
+
+---
+
+二、将“### 6. 已知限制”中的：
+
+4. 只有三层全局注意力，这是效率与密集全局交互能力之间的结构折中。
+5. 词/跨度压力测试明显比标准混合遮蔽困难，连续跨度恢复仍有提升空间。
+
+改为：
+
+4. 模型只有三层全局注意力，但 REAL-LONG 已确认 400+ 字远端 Cue 能稳定影响预测；是否会限制更复杂的多轮全局交互，仍需要同数据控制实验进一步验证。
+5. 稀有词与连续跨度恢复仍弱于成熟大语料基线；由于基线训练资源显著更大且训练流程不同，目前不能把这一差距直接归因于 HCAM 架构。
+
+---
+
+三、English section 的 “Pretraining results” 后同步新增对应英文摘要，核心措辞建议：
+
+### 4.1 Real-text MLM, rare-span and long-range evaluation
+
+On the additional real-text benchmark, HCAM reaches **68.50% Top-1 / 88.38% Top-5** on REAL-MLM. Its Top-5 is only **0.12 percentage points** below Chinese-RoBERTa-WWM-ext (88.50%).
+
+On REAL-LONG, HCAM obtains a **95.00% cue-help rate** and mean **ΔlogP +2.467**, comparable in scale to Chinese-RoBERTa-WWM-ext (96.25%, +2.296) and RoFormerV2-Char-Base (95.63%, +2.574). In the 384–469-character bucket, removing the distant cue reduces HCAM Top-1 from **42.45% to 10.38%**, providing direct evidence that distant context is genuinely used by the model.
+
+These comparisons are not matched-data architectural ablations. HCAM was trained from scratch on about **1.638B effective non-duplicate characters** (~3.276B character-token exposures), whereas HFL documents about **5.4B words** for the EXT corpus and the RoFormerV2 authors report roughly **280GB of unsupervised data** followed by about **20GB of supervised multi-task data**. The units are not directly interchangeable, but the training-resource scales are clearly unmatched.
+
+**Despite substantially smaller training data and an individual-scale compute budget, HCAM still achieves real-text MLM and long-range context utilization that are not weak relative to these mature baselines, with several metrics in the same range.** The remaining gaps, especially on rare-span recovery, are strongly confounded by long-tail coverage and training scale.
+
+Across the existing autoregressive scaling experiments, MLM evaluation, and REAL-LONG cue ablation, **no systematic performance degradation has yet been identified that can be clearly attributed to the hybrid convolution-attention architecture itself**. A strict architectural conclusion would require a future matched-data, matched-parameter, matched-step ablation.
