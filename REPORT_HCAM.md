@@ -1,62 +1,40 @@
-# HCAM 100M 中文掩码预训练模型报告
+# HCAM 100M 技术报告 / Technical Report
 
-## 摘要
-
-HCAM（**Hybrid Convolution-Attention Model，混合卷积-注意力模型**）100M 是一个面向中文文本的双向掩码语言模型（Masked Language Model, MLM）。它没有采用“每一层都执行全局自注意力”的传统 Transformer 编码器堆叠，而是使用 **7 个双向门控扩张卷积局部混合层 + 3 个双向 Gated-GQA 全局注意力层**组成混合编码器，使大部分层专注于局部词法、短语和相邻结构建模，并通过少量全局注意力层完成跨长上下文的信息交互。
-
-模型使用 **18,000 个字符级 token**作为真正的输入输出词表。SentencePiece 不负责模型 token ID 编码，只在预训练数据构造阶段提供词/子词边界，用于字符级、整组级和连续组跨度级的动态掩码。预训练有效字符规模约 **1.638B**，通过两组错位窗口形成约 **3.276B 字符 token 的总训练暴露量**。
-
-最终基座共有 **102,778,220 个唯一可训练参数（约 102.78M）**，隐藏维度 1056，上下文长度 600。最终 FP32 纯权重约 392 MiB，不包含 AdamW、GradScaler、训练缓存或原始语料。
-
-除预训练基准外，我们还使用该基座进行了一个小规模的“的 / 地 / 得”中文纠错微调实验。该实验不是本次开源的主体，但可作为 HCAM 下游适配能力的一个实例：在新的自然文本验证集上，首次 HCAM 微调模型取得 **95.148% Macro-F1、95.882% Macro-F0.5**，同期 RoFormerV2 基线为 **83.205% / 84.774%**；在另一套 1,600 句外部自然验证集上，HCAM 微调模型的 Macro-F1 为 **97.496%**，RoFormerV2 为 **95.806%**。这些结果只代表该具体纠错任务和对应评测集，不应被外推为通用中文理解排名。
+**HCAM = Hybrid Convolution-Attention Model / 混合卷积-注意力模型**
 
 ---
 
-## 1. 研究目标与模型定位
+## 中文
 
-HCAM 的核心目标是验证一种更偏向“**局部高频模式建模 + 稀疏全局交互**”的中文双向编码器设计。
+### 摘要
 
-模型的主要设计原则是：
+HCAM 100M 是一个面向中文文本的双向掩码语言模型（MLM）。模型没有采用“每层全局自注意力”的纯 Transformer 编码器，而是使用 **7 个双向门控扩张卷积局部层 + 3 个双向 Gated-GQA 全局注意力层**构成 10 层混合编码器。设计目标是在中文高频局部词法和短语模式上使用成本较低的局部混合，同时保留少量全局注意力用于远距离信息交互。
 
-- 高频局部结构主要由双向门控扩张卷积建模；
-- 长距离依赖由少量 GQA 全局注意力层完成；
-- 训练目标保持为标准 MLM 字符恢复；
-- 掩码粒度不局限于随机单字，而会根据 SentencePiece 边界扩展到完整字符组与连续组跨度；
-- `[MASK]` 不占用字符词表 ID，而使用独立的可学习 mask embedding；
-- 输入 embedding 与 MLM 输出权重共享；
-- MLM 计算可只针对被预测位置生成词表 logits，避免无意义的全序列 18K 输出。
+模型使用 **18,000 个字符 token**作为真正输入输出词表，隐藏维度 1056，上下文长度 600，总计 **102,778,220 个唯一可训练参数**。SentencePiece 不参与模型 token ID 编码，只在预训练阶段为整组和连续跨度掩码提供词/子词边界指导。
 
-HCAM 更适合作为中文编码器、MLM 表征、文本分类、序列标注、纠错等任务的预训练基座，而不是自回归聊天模型。它不以逐 token 生成文本为主要目标。
+预训练使用约 **1.638B 个有效不重复字符 token**，通过前后两组错位窗口形成约 **3.276B 字符 token 的训练暴露量**。最终固定验证 MLM loss 为 **1.9900**、masked accuracy 为 **60.76%**。此外，本报告记录一个小型“的/地/得”纠错微调实验，用于说明 HCAM 作为下游中文编码器基座的可适配性；该实验不是本次开源的核心任务。
 
----
-
-## 2. 模型架构
-
-### 2.1 总体配置
+### 1. 架构
 
 | 项目 | 配置 |
 |---|---:|
 | 参数量 | **102,778,220** |
-| 词表 | 18,000 字符 token |
+| 字符词表 | 18,000 |
 | 上下文长度 | 600 |
 | 隐藏维度 | 1056 |
 | 总层数 | 10 |
 | 双向门控扩张卷积层 | 7 |
-| 双向 Gated-GQA 层 | 3 |
-| 全局注意力位置 | 第 3 / 7 / 10 层 |
-| Query Heads | 16 |
-| KV Heads | 4 |
-| Head Dim | 66 |
-| 局部卷积内部维度 | 1600 |
+| 双向 Gated-GQA | 3 |
+| GQA 位置 | 第 3 / 7 / 10 层 |
+| Query / KV heads | 16 / 4 |
+| Head dim | 66 |
+| 局部内部维度 | 1600 |
 | GQA FFN 隐藏维度 | 2944 |
-| 归一化 | RMSNorm |
+| Norm | RMSNorm |
 | FFN | SwiGLU |
-| 位置编码 | RoPE |
+| Position | RoPE |
 | Dropout | 0.10 |
 | 输入/输出权重共享 | 是 |
-| 注意力方向 | 双向，非因果 |
-
-整体结构如下：
 
 ```text
 Token Embedding + learned Mask Embedding
@@ -75,22 +53,12 @@ Token Embedding + learned Mask Embedding
           │
        RMSNorm
           │
- Tied LM Head / Character logits
+ Tied 18K Character LM Head
 ```
 
-这里的“卷积-注意力混合”即 HCAM 名称的来源：局部卷积层负责大部分高频邻域建模，全局注意力层只在三个位置插入。
+#### 1.1 双向门控扩张卷积层
 
-### 2.2 双向门控扩张卷积局部混合层
-
-局部层首先对输入执行 RMSNorm，再通过一次无偏置线性映射产生三个分支：
-
-1. `content`
-2. `activation_gate`
-3. `modulation_gate`
-
-`content` 分支经过 depthwise dilated Conv1d。卷积采用**对称 padding**，因此能够同时利用目标位置左右两侧上下文，不是因果卷积。
-
-局部混合核心可写为：
+局部层先执行 RMSNorm，再由无偏置线性映射产生 `content`、`activation_gate` 和 `modulation_gate` 三个分支。`content` 进入 depthwise dilated Conv1d，并使用对称 padding，因此可以同时利用目标位置左右上下文。核心混合为：
 
 ```text
 SiLU(dilated_conv(content))
@@ -98,133 +66,23 @@ SiLU(dilated_conv(content))
 × sigmoid(modulation_gate)
 ```
 
-随后通过线性层投影回 1056 维，并与输入残差相加。
+随后投影回 1056 维并执行残差连接。7 个局部层按 `(kernel=3,dilation=1)`、`(3,2)`、`(5,2)` 循环使用。
 
-7 个局部层循环使用三组卷积配置：
+#### 1.2 Gated-GQA 全局层
 
-- `kernel=3, dilation=1`
-- `kernel=3, dilation=2`
-- `kernel=5, dilation=2`
+三个全局层使用双向 Grouped-Query Attention：16 个 Query heads、4 个 KV heads、每头 66 维，Q/K 在注意力前分别进行 RMSNorm，并使用 RoPE。注意力为非因果模式。SDPA 输出在最终输出投影前乘以逐 token、逐 head 的 sigmoid gate。每个 GQA 层后跟 RMSNorm + SwiGLU FFN，FFN 隐藏维度为 2944。
 
-这种结构把多数层的计算重点放在局部模式上。相对于 10 层全部执行全局自注意力，它降低了全局注意力的使用频率，同时保留了较深的双向局部特征变换。
+#### 1.3 Mask embedding 与 tied head
 
-### 2.3 双向 Gated-GQA 全局层
+`[MASK]` 不占用字符词表 ID，而使用单独的可学习 mask embedding。最终 18K LM head 与输入 embedding 共享权重。模型前向还支持只对 `prediction_indices` 指定的位置生成词表 logits，以减少 MLM 中无关位置的输出计算。
 
-三个全局层采用 Grouped-Query Attention：
+### 2. 字符 tokenizer 与多粒度遮蔽
 
-- Query heads：16
-- KV heads：4
-- Q:KV 分组比例：4:1
-- Head dimension：66
-- Q/K 在注意力计算前分别执行 RMSNorm
-- Q/K 使用 RoPE
-- `is_causal=False`
-- 注意力输出在最终输出投影前加入逐 token、逐 head 的 sigmoid gate
+真实模型 token 为字符级。词表包含 `<unk> <pad> <bos> <eos> <用户> <助手> <换行> <段落>` 8 个固定特殊 token，其余 17,992 个位置为普通 Unicode 字符。极罕见、未进入 18K 词表的字符回退到 `<unk>`。
 
-每个全局注意力层后均包含 RMSNorm + SwiGLU FFN，FFN 隐藏维度为 2944。
+SentencePiece 只作为边界指导：识别字符组、提供整组 mask 边界、提供连续多个组的跨度 mask 边界。SentencePiece piece ID 不作为 HCAM 模型输入。
 
-GQA 减少了 K/V 分支规模，而三层全局注意力负责将局部卷积已经形成的表示在更长距离上重新交互。
-
-### 2.4 Embedding、Mask 与输出头
-
-模型真实 token embedding 维度为 `18000 × 1056`。预训练时的 mask 位置使用独立可学习 `mask_embedding`，因此 `[MASK]` 不需要占据词表中的一个字符 ID。
-
-最终隐藏状态经 RMSNorm 后映射到 18K 字符词表。LM Head 与输入 Embedding **共享权重**，避免再次增加一套约 19M 参数的输出矩阵。
-
-模型前向支持只为 `prediction_indices` 指定的位置计算 logits。对于 MLM，这可以避免大量未遮蔽位置执行 18K 分类。
-
----
-
-## 3. 字符 tokenizer 与 SentencePiece 边界指导
-
-HCAM 的实际模型 token 是**字符级 token**。
-
-字符词表共 18,000 项，其中包含 8 个固定特殊 token：
-
-```text
-<unk> <pad> <bos> <eos>
-<用户> <助手> <换行> <段落>
-```
-
-其余 17,992 个位置为普通 Unicode 字符，常规中文输入保持“一字符一 token”。极低频且未进入 18K 词表的字符回退到 `<unk>`。
-
-预训练包还使用一套 SentencePiece 边界模型，但它与 HCAM 字符 tokenizer 是两个不同概念。SentencePiece 只负责：
-
-- 判断一组字符属于哪个词/子词边界；
-- 为整组掩码提供边界；
-- 为连续多个组的跨度掩码提供边界。
-
-SentencePiece piece ID **不会作为 HCAM 输入 ID**。因此普通推理只需要字符 tokenizer；只有继续预训练或复现实验中的多粒度掩码时才需要边界指导模型。
-
----
-
-## 4. 预训练数据
-
-### 4.1 规模
-
-预训练数据与训练暴露规模如下：
-
-| 项目 | 规模 |
-|---|---:|
-| 有效训练字符 token | **约 1.638B** |
-| 两组错位窗口总训练暴露量 | **约 3.276B** |
-| 固定验证集 | **1M 字符 token** |
-| 虚拟训练轮数 | 10 |
-| 序列长度 | 600 |
-
-前 5 轮使用第一组窗口，后 5 轮使用错位后的第二组窗口。第二阶段不是简单复制完全相同的训练 block，而是通过窗口错位让相同原始文本在不同上下文边界下再次暴露。
-
-### 4.2 数据来源设计
-
-预处理阶段按以下目标比例混合中文语料：
-
-| 来源 | 目标比例 |
-|---|---:|
-| Ultra-FineWeb 中文 | ≤50% |
-| SkyPile 中文 | 32% |
-| Wikipedia | 14% |
-| 自有/用户语料 | 4% |
-
-当 Ultra-FineWeb 或 Wikipedia 不足目标量时，缺口由 SkyPile 回补，而不是为了达到配额重复较早文本。
-
-清洗流程包括中文比例过滤、文本长度过滤、超长原文截断、HTML/段落结构恢复等。最终训练阶段使用预编码的字符 token 流，以及与其对齐的 SentencePiece 边界指导流。
-
-本仓库**不直接分发原始训练语料**。数据来源、抽样方式和清洗逻辑可以公开，但原始数据的获取、使用与再分发应分别遵守各来源自身许可。
-
----
-
-## 5. 动态多粒度 MLM 训练目标
-
-### 5.1 遮蔽率调度
-
-训练总遮蔽率从第 1 轮约 30% 逐渐下降至第 10 轮 15%。训练前期较高遮蔽率提供更强恢复压力，后期逐步回到更接近常见 MLM 评测的遮蔽水平。
-
-固定验证集始终采用：
-
-- mask ratio：15%
-- 固定随机种子：20260726
-
-因此不同训练轮次间的固定验证指标可直接比较。
-
-### 5.2 80 / 10 / 10 替换策略
-
-对于被选为训练目标的位置：
-
-- 80%：使用独立可学习 mask embedding
-- 10%：替换为随机字符 token
-- 10%：保留原字符
-
-该策略保持了 MLM 常见的随机替换与原字符保留机制，同时把真正的 mask 表示从词表 ID 中分离出来。
-
-### 5.3 掩码粒度
-
-训练时在三种粒度之间采样：
-
-1. 随机字符级掩码
-2. 完整 SentencePiece 字符组掩码
-3. 相邻多个 SentencePiece 组组成的连续跨度掩码
-
-调度如下：
+预训练总遮蔽率由第 1 轮约 30% 逐步下降到第 10 轮 15%。被选中的目标位置使用 80/10/10 替换：80% learned mask embedding、10% 随机字符、10% 保留原字符。
 
 | 轮次 | 字符 | 整组 | 相邻组跨度 |
 |---|---:|---:|---:|
@@ -233,265 +91,194 @@ SentencePiece piece ID **不会作为 HCAM 输入 ID**。因此普通推理只�
 | 7–9 | 40.00% | 45.00% | 15.00% |
 | 10 | **25.00%** | **50.00%** | **25.00%** |
 
-第 10 轮进一步提高整组与连续跨度恢复比例，使末轮训练更多面对完整词组、短语和局部跨度被整体遮蔽的情况。
+### 3. 预训练数据与优化
 
----
+预训练有效数据规模约 1.638B 字符。前 5 轮使用第一组窗口，后 5 轮使用错位后的第二组窗口，使相同原文在不同上下文边界下再次暴露，总训练暴露量约 3.276B 字符 token。固定验证集约 1M 字符 token。
 
-## 6. 优化配置
+目标数据混合比例：Ultra-FineWeb 中文 ≤50%、SkyPile-150B 中文 32%、Wikipedia 14%、自有/用户语料 4%。当 Ultra-FineWeb 或 Wikipedia 不足目标量时，缺口由 SkyPile 回补，而不是重复较早文本。仓库不重新分发原始训练语料；详见 `DATA_LICENSES.md`。
 
-预训练优化器为 AdamW。
-
-| 配置 | 数值 |
+| 优化配置 | 数值 |
 |---|---:|
+| Optimizer | AdamW |
 | Peak LR | 7e-4 |
 | Warmup | 总训练 token 的 4% |
-| LR 调度 | token-based cosine |
+| LR schedule | token-based cosine |
 | 常规最低比例 | peak LR × 0.08 |
 | 第 10 轮 LR floor | 1e-4 |
-| Weight Decay | 0.08 |
+| Weight decay | 0.08 |
 | Z-loss | 1e-4 |
-| Gradient Clip | 1.0 |
-| Dropout | 0.10 |
-| 有效全局 Batch | 384 |
+| Gradient clip | 1.0 |
+| Effective global batch | 384 |
 
-训练使用自动混合精度和 PyTorch SDPA，并支持双 GPU DDP。实际主要训练环境为 Kaggle T4 ×2。
+训练使用自动混合精度、PyTorch SDPA，并支持双 GPU DDP；主要训练环境为 Kaggle T4×2。
 
-第 10 轮单独采用 `1e-4` 的学习率下限，用于避免训练末期学习率衰减到几乎无法继续更新，同时保持明显低于峰值学习率的稳定更新幅度。
+### 4. 预训练结果
 
----
-
-## 7. 预训练结果
-
-### 7.1 固定验证集
-
-第 10 轮结束时：
+第 10 轮结束时固定验证集：
 
 | 指标 | 结果 |
 |---|---:|
 | MLM Loss | **1.9900** |
 | Masked Accuracy | **60.76%** |
-| Masked PPL = exp(loss) | **7.32** |
+| Masked PPL | **7.32** |
 
-从中后期训练趋势看，固定验证准确率仍有缓慢提升，没有出现明显的末轮训练崩溃。
+训练结束后还运行两套零微调 MLM 基准：
 
-### 7.2 零微调 MLM 基准
+| 基准 | Loss | PPL | Top-1 | Top-5 |
+|---|---:|---:|---:|---:|
+| 标准混合遮蔽 | 2.0044 | 7.42 | 60.58% | 75.50% |
+| 词/跨度压力测试 | 3.0540 | 21.20 | 43.87% | 59.49% |
 
-训练完成后，在不更新模型参数的前提下运行两套内置 MLM 基准。
+这里的 PPL 是 masked cross-entropy 的指数，只适合同一词表和同一评测定义下观察，不应直接与不同 tokenizer 的 BERT/RoBERTa/MacBERT PPL 横向比较。
 
-**标准混合遮蔽**：15% mask，字符 / 整组 / 跨度 = 50 / 37.5 / 12.5。
+### 5. 小型下游微调：中文“的/地/得”纠错
 
-| 指标 | 结果 |
-|---|---:|
-| MLM Loss | **2.0044** |
-| Masked PPL | **7.42** |
-| Top-1 | **60.58%** |
-| Top-5 | **75.50%** |
+该实验来自 Dededi 中文纠错项目，只作为基座下游适配示例。每个待判断的“的/地/得”位置在进入模型时被替换为 learned mask embedding，让 HCAM 根据左右上下文恢复正确类别。三类在 18K 词表中的 ID 为：`的=138`、`地=164`、`得=243`。部署时可以直接从 tied embedding 抽取这三行形成 3×1056 分类 head，在 FP32 下与完整 LM head 对这三个类别的 logits 数学等价。
 
-**词/跨度压力测试**：15% mask，字符 / 整组 / 跨度 = 0 / 65 / 35。
+第一版实际部署模型采用第 3 轮 EMA 权重（E3-EMA）。当时的内部微调数据没有整理成可公开复现的冻结训练快照，因此本报告不声明一个无法核验的精确训练样本数。可以确认训练样本覆盖真实“的/地/得”用法、固定搭配、专名、方式状语、程度补语、质地/性质结构以及误改困难样本增强。
 
-| 指标 | 结果 |
-|---|---:|
-| MLM Loss | **3.0540** |
-| Masked PPL | **21.20** |
-| Top-1 | **43.87%** |
-| Top-5 | **59.49%** |
+主要对比结果：
 
-这里的 PPL 是 `exp(masked cross-entropy)`，只适合在相同词表、相同测试定义下观察 MLM 恢复难度，不等价于自回归语言模型常见的全序列 perplexity，也不建议直接拿它与不同 tokenizer 的 BERT/RoBERTa/MacBERT PPL 横向比较。
-
----
-
-## 8. 下游微调实验：中文“的 / 地 / 得”纠错
-
-本节仅作为 HCAM 基座的一个小型下游实验，不是本项目的主要训练目标，也不把它视为通用中文理解基准。
-
-### 8.1 任务设计
-
-实验任务来自 Dededi 中文纠错项目：给定自然中文文本，对文本中出现的“的、地、得”位置判断其正确类别。
-
-微调与部署阶段沿用 HCAM 预训练时的 mask embedding：每一个待判断的“的 / 地 / 得”位置在进入模型时都被替换为 learned mask embedding，模型根据左右双向上下文恢复该位置应对应的类别。
-
-三类目标字符在 18K 字符词表中的 ID 为：
-
-```text
-的 = 138
-地 = 164
-得 = 243
-```
-
-部署时不需要输出完整 18K logits。三分类 head 的 `3 × 1056` 权重直接从当前微调模型的 tied embedding 中抽取上述三行，因此在 FP32 下与完整 LM Head 对三个目标字符的 logits 数学等价。
-
-首次用于实际 APP 的微调模型采用第 3 轮 EMA 权重（E3-EMA）。本次开源以预训练基座为主体；当时的微调训练数据仍属于 Dededi 项目内部迭代数据，没有被整理成准备公开的固定训练快照，因此这里**不声明一个无法从公开资产复现核验的训练样本总数**。可以确认的是，训练数据针对真实“的 / 地 / 得”用法，并包含固定搭配、专名、方式状语、程度补语、质地/性质结构以及容易造成误改的困难样本增强。
-
-### 8.2 第一轮对比测试
-
-在首次微调后的对比中，HCAM E3-EMA 与 RoFormerV2 在一套较小的困难集上非常接近，但在更大的混合集上 HCAM 更稳定。
-
-| 测试集 | 模型 | Macro-F1 | Macro-F0.5 | Target Accuracy |
+| 测试集 | 模型 | Macro-F1 | Macro-F0.5 | 其他 |
 |---|---|---:|---:|---:|
-| Fresh Hard，120 句 / 383 目标位 | HCAM E3-EMA | 97.42% | **97.63%** | 97.39% |
-| Fresh Hard，120 句 / 383 目标位 | RoFormerV2 | **97.44%** | 97.46% | 97.39% |
-| Mixed Total，720 句 / 2,275 目标位 | HCAM E3-EMA | **98.17%** | **98.24%** | **98.42%** |
-| Mixed Total，720 句 / 2,275 目标位 | RoFormerV2 | 95.85% | 96.26% | 96.53% |
+| Fresh Hard, 120句 / 383位 | HCAM E3-EMA | 97.42% | **97.63%** | Target Acc. 97.39% |
+| Fresh Hard | RoFormerV2 | **97.44%** | 97.46% | Target Acc. 97.39% |
+| Mixed Total, 720句 / 2,275位 | **HCAM E3-EMA** | **98.17%** | **98.24%** | Target Acc. **98.42%** |
+| Mixed Total | RoFormerV2 | 95.85% | 96.26% | Target Acc. 96.53% |
+| External DEV, 1,600句 / 3,025位 | **HCAM E3-EMA** | **97.496%** | **97.270%** | Clean false action **0.628%** |
+| External DEV | HCAM Base | 95.456% | 96.416% | Clean false action 0.893% |
+| External DEV | RoFormerV2 E3-EMA | 95.806% | 95.437% | Clean false action 0.826% |
+| Natural DEV3, 1,200段 / 2,734位 | **HCAM E3-EMA** | **95.148%** | **95.882%** | Clean false action **0.988%** |
+| Natural DEV3 | RoFormerV2 E3-EMA | 83.205% | 84.774% | Clean false action 3.548% |
 
-这组结果说明：在小型困难集上两种架构可以非常接近；扩大到更混合的文本后，HCAM 微调模型表现出更好的整体稳定性。
+External DEV 中 HCAM E3-EMA 的分类别 F1：的 99.143%、地 96.690%、得 96.654%。Natural DEV3 由 DRCD-dev 和 Wikipedia 各 600 条组成，目标分布为 的 2268 / 地 333 / 得 133，冻结 SHA256 为 `4a0d29f320dcf4ebb46a8ae73de61f372ea5201045918733713e75dcdd700487`。
 
-### 8.3 外部自然文本验证
+不同测试集之间分数变化较大，说明“的/地/得”任务对句式和数据来源非常敏感。曾有一套人工模板比例较高的专项压力集明显偏向 RoFormerV2，因此本报告不以单一集合给出通用架构优劣结论，也不把该下游实验外推为通用中文能力排名。
 
-为了降低只看内部同源样本的偏差，后续又使用了未参与该模型训练的自然文本验证集进行比较。
+### 6. 已知限制
 
-**External DEV：1,600 句，3,025 个“的 / 地 / 得”目标位置**
+1. HCAM 是双向 MLM 编码器，不是自回归聊天模型。
+2. 上下文长度为 600，不属于长上下文模型。
+3. 18K 高频字符词表无法覆盖全部 Unicode，极罕见字符会回退到 `<unk>`。
+4. 只有三层全局注意力，这是效率与密集全局交互能力之间的结构折中。
+5. 词/跨度压力测试明显比标准混合遮蔽困难，连续跨度恢复仍有提升空间。
+6. 下游“的/地/得”实验不等于 CLUE、NER、阅读理解等通用中文 benchmark。
+7. 训练数据来自多个上游来源，各自许可不同；本项目不重新分发原始数据，模型权重许可也不能消除第三方上游条款。
 
-| 模型 | Macro-F1 | Macro-F0.5 | Target Acc. | Sentence Acc. | Clean False Action | NLL |
-|---|---:|---:|---:|---:|---:|---:|
-| HCAM Base（未微调） | 95.456% | 96.416% | 97.455% | 95.375% | 0.893% | 0.065408 |
-| RoFormerV2 E3-EMA | 95.806% | 95.437% | 98.017% | 96.688% | 0.826% | 0.070794 |
-| **HCAM E3-EMA** | **97.496%** | **97.270%** | **98.579%** | **97.438%** | **0.628%** | **0.047497** |
+---
 
-HCAM E3-EMA 的分类别 F1 为：
+## English
 
-| 类别 | F1 |
+### Abstract
+
+HCAM 100M is a bidirectional Chinese masked language model built around a **hybrid convolution-attention encoder** rather than a full-attention Transformer stack. Its 10 layers contain **7 bidirectional gated dilated-convolution local mixers and 3 bidirectional Gated-GQA global-attention blocks**. The design shifts most high-frequency lexical and phrase modeling to local operators while retaining sparse global interactions for longer-range context.
+
+The model uses a true **18,000-token character vocabulary**, hidden size 1056, context length 600, and contains **102,778,220 unique trainable parameters**. SentencePiece IDs are never fed to the model; SentencePiece is used only as a word/subword-boundary guide when constructing whole-group and adjacent-group span masks during pretraining.
+
+Pretraining uses approximately **1.638B effective non-duplicate character tokens** and two offset window passes, for about **3.276B character-token exposures**. The final fixed validation MLM loss is **1.9900** with **60.76% masked accuracy**. A small Chinese 的/地/得 correction fine-tuning experiment is also reported as a downstream case study, but it is not the primary objective of this release.
+
+### 1. Architecture
+
+| Item | Value |
 |---|---:|
-| 的 | 99.143% |
-| 地 | 96.690% |
-| 得 | 96.654% |
+| Parameters | **102,778,220** |
+| Character vocabulary | 18,000 |
+| Context length | 600 |
+| Hidden size | 1056 |
+| Total layers | 10 |
+| Bidirectional gated dilated-conv layers | 7 |
+| Bidirectional Gated-GQA layers | 3 |
+| Global-attention layers | 3 / 7 / 10 |
+| Query / KV heads | 16 / 4 |
+| Head dim | 66 |
+| Local inner dim | 1600 |
+| GQA FFN dim | 2944 |
+| Norm / FFN / position | RMSNorm / SwiGLU / RoPE |
+| Dropout | 0.10 |
+| Input/output weight tying | Yes |
 
-在这套自然验证集上，微调后的 HCAM 相比未微调基座 Macro-F1 提高约 **2.04 个百分点**，同时 Clean False Action 从 0.893% 降至 0.628%。
-
-### 8.4 Natural DEV3：新的跨来源自然文本检查
-
-随后又冻结了一套独立的 Natural DEV3，用于检查模型是否只是在早期验证集上获得优势。该集合包含：
-
-- 1,200 个自然文本片段；
-- 2,734 个目标位置；
-- 600 条来自 DRCD-dev；
-- 600 条来自 Wikipedia；
-- 目标字符分布：的 2,268 / 地 333 / 得 133；
-- SHA256：`4a0d29f320dcf4ebb46a8ae73de61f372ea5201045918733713e75dcdd700487`。
-
-统一评测结果：
-
-| 模型 | Macro-F1 | Macro-F0.5 | Clean False Action | 正确“的”误改率 | NLL |
-|---|---:|---:|---:|---:|---:|
-| **HCAM E3-EMA** | **95.148%** | **95.882%** | **0.988%** | **0.485%** | 0.071486 |
-| RoFormerV2 E3-EMA | 83.205% | 84.774% | 3.548% | 0.838% | 0.205673 |
-
-该结果与 External DEV 的方向一致，但两者数值差异较大，说明“的 / 地 / 得”任务对数据来源与句式分布非常敏感。因此这些数值应视为**任务内实验结果**，不能据此宣称 HCAM 在所有中文任务上优于 RoFormerV2。
-
-实验中还出现过一套人工模板较多的专项压力集，在该集合上 RoFormerV2 分数明显更高。这进一步说明单一验证集可能强烈偏向特定词法/模板分布，因此本报告把自然文本集合放在主要位置，并保留这一现象作为评测局限，而不进行选择性隐藏。
-
----
-
-## 9. 移动端部署实验（非基座主体）
-
-“的 / 地 / 得”微调模型还进行了移动端压缩实验，用于 Dededi APP，而不是 HCAM 预训练基座本身的发布格式。
-
-部署包装器具有以下特点：
-
-- 输入：`int64 [B, L]`
-- 输出：`float32 [B, L, 3]`
-- 最大文本长度：300 字符
-- 加 BOS/EOS 后最大模型长度：302
-- 所有输入中的“的 / 地 / 得”目标位置在模型内部自动使用 learned mask embedding
-- 最终三分类 head 保持 FP32
-
-实验性 ExecuTorch/XNNPACK 版本采用 FP16 embedding + 主体 Linear 动态 INT8/per-channel + FP32 三分类 head，文件约 **117.36 MiB**。该版本已通过多种动态长度 smoke test；它属于下游部署实验，不是本次预训练基座的默认权重格式。
-
----
-
-## 10. 已知限制
-
-1. **当前主结果仍然是 MLM 预训练指标。** 目前没有系统完成 CLUE、NER、分类、阅读理解等标准下游任务，因此不能仅凭 MLM loss 或一个纠错任务给出通用能力排名。
-
-2. **字符级词表对极罕见字符使用 `<unk>`。** 18K 高频字符设计控制了 embedding / 输出规模，但不会覆盖全部 Unicode 字符。
-
-3. **上下文长度为 600。** 当前版本不是长上下文模型。
-
-4. **只有三层全局注意力。** 这是计算成本和全局交互能力之间的结构折中。在依赖密集跨位置交互的任务中，少量全局层未必优于每层全注意力编码器。
-
-5. **连续词/跨度恢复仍明显更难。** 压力测试从标准混合遮蔽的 Top-1 60.58% 降至 43.87%，说明完整词组和连续跨度恢复仍有明显提升空间。
-
-6. **不同 tokenizer 的 MLM PPL 不宜直接横向比较。** 若与 BERT、RoBERTa、MacBERT 等模型比较，更适合固定相同文本和相同汉字位置后比较 Top-1、Top-5、MRR 或统一下游任务指标。
-
-7. **纠错微调结果不是预训练基座的通用排名。** External DEV 与 Natural DEV3 已经显示数据分布会明显影响绝对分数，因此报告保留数据来源与规模，而不只给出一个最高数字。
-
----
-
-## 11. 建议开源文件结构
-
-仓库中的代码与小文件建议保持轻量：
+The local mixer applies RMSNorm, projects into content/activation-gate/modulation-gate branches, and computes:
 
 ```text
-README.md
-REPORT.md
-LICENSE
-MODEL_LICENSE.md
-modeling_hcam.py
-config.json
-requirements.txt
-benchmark_mlm.py
-tokenizer.model
-tokenizer.vocab
-tokenizer_meta.json
-
-# 可选：只有在需要复现多粒度掩码/继续预训练时再上传
-mask_guide_tokenizer.model
-mask_guide_tokenizer.vocab
-mask_guide_tokenizer_meta.json
+SiLU(dilated_conv(content))
+× SiLU(activation_gate)
+× sigmoid(modulation_gate)
 ```
 
-预训练 FP32 权重：
+The depthwise convolution uses symmetric padding, making it bidirectional. Local layers cycle through `(k=3,d=1)`, `(k=3,d=2)`, and `(k=5,d=2)`.
 
-```text
-hcam_100m_fp32.pt
-```
+Each Gated-GQA block uses 16 query heads, 4 KV heads, 66 dimensions per head, Q/K RMSNorm, RoPE, non-causal SDPA, and a token-wise/head-wise sigmoid gate on the attention output before the output projection. It is followed by RMSNorm + SwiGLU with a 2944-dimensional hidden layer.
 
-约 392 MiB。该文件不建议放进普通 Git 历史，应通过 GitHub Release asset 或专门的模型托管平台发布。
+The learned mask embedding is separate from the 18K character IDs. The final LM head is tied to the input embedding. The forward API supports `prediction_indices`, allowing the model to compute vocabulary logits only at selected MLM positions.
 
-训练用的完整 `last.pt`、AdamW 状态、GradScaler、数 GB 预编码缓存、临时 checkpoint 和原始训练语料都不属于使用基座所必需的开源文件。
+### 2. Character tokenizer and masking
+
+The runtime tokenizer is character-level. Eight fixed special tokens are reserved: `<unk> <pad> <bos> <eos> <用户> <助手> <换行> <段落>`. The remaining 17,992 entries are ordinary Unicode characters; very rare unseen characters fall back to `<unk>`.
+
+SentencePiece is only a boundary guide. It defines whole-piece and adjacent-piece masking spans but its piece IDs are not model inputs.
+
+The overall mask ratio anneals from about 30% in epoch 1 to 15% in epoch 10. Selected targets use an 80/10/10 corruption policy: learned mask embedding / random character / unchanged character.
+
+| Epochs | Character | Whole group | Adjacent-group span |
+|---|---:|---:|---:|
+| 1–3 | 50.00% | 37.50% | 12.50% |
+| 4–6 | 45.00% | 41.25% | 13.75% |
+| 7–9 | 40.00% | 45.00% | 15.00% |
+| 10 | **25.00%** | **50.00%** | **25.00%** |
+
+### 3. Pretraining data and optimization
+
+The effective training corpus contains about 1.638B characters. The first five virtual epochs use one window alignment and the final five use an offset alignment, producing about 3.276B character-token exposures. The fixed validation stream contains about 1M character tokens.
+
+The target source mixture is ≤50% Ultra-FineWeb Chinese, 32% SkyPile-150B Chinese, 14% Wikipedia, and 4% custom/user corpus. Shortfalls in Ultra-FineWeb or Wikipedia were filled from SkyPile instead of repeating earlier text. Raw corpora are not redistributed; see `DATA_LICENSES.md`.
+
+Optimization uses AdamW, peak LR `7e-4`, 4% token-based warmup, cosine decay, weight decay 0.08, z-loss `1e-4`, gradient clipping 1.0, and effective global batch 384. The final epoch uses an LR floor of `1e-4`. Training primarily ran on Kaggle T4×2 with AMP, PyTorch SDPA, and DDP support.
+
+### 4. Pretraining results
+
+| Evaluation | Loss | Masked PPL | Top-1 | Top-5 |
+|---|---:|---:|---:|---:|
+| Final fixed validation | **1.9900** | **7.32** | **60.76%** | — |
+| Standard mixed-masking benchmark | 2.0044 | 7.42 | 60.58% | 75.50% |
+| Whole-piece/span stress benchmark | 3.0540 | 21.20 | 43.87% | 59.49% |
+
+Masked PPL is `exp(masked cross-entropy)` and is meaningful only under compatible tokenizer and masking definitions.
+
+### 5. Small downstream fine-tuning case study: 的 / 地 / 得
+
+The Dededi experiment masks every target 的/地/得 position with HCAM's learned mask embedding and predicts the correct class from bidirectional context. Their character IDs are `的=138`, `地=164`, and `得=243`. For deployment, the three corresponding tied-embedding rows can be used as a 3×1056 classifier head, mathematically matching the three relevant full-vocabulary logits in FP32.
+
+The first deployed HCAM fine-tune used epoch-3 EMA weights (E3-EMA). The original internal training set was not frozen as a public reproducibility snapshot, so this report intentionally does not claim an unverifiable exact fine-tuning sample count. The data covered natural 的/地/得 usage, fixed expressions, proper names, manner adverbials, complement structures, texture/property constructions, and difficult false-positive cases.
+
+Key comparisons:
+
+- Mixed Total (720 sentences / 2,275 targets): HCAM **98.17% Macro-F1** vs RoFormerV2 95.85%.
+- External DEV (1,600 sentences / 3,025 targets): HCAM **97.496% Macro-F1** vs RoFormerV2 95.806%; HCAM clean false-action rate 0.628%.
+- Natural DEV3 (1,200 snippets / 2,734 targets): HCAM **95.148% Macro-F1 / 95.882% Macro-F0.5** vs RoFormerV2 83.205% / 84.774%; clean false-action 0.988% vs 3.548%.
+
+External DEV per-class HCAM F1: 的 99.143%, 地 96.690%, 得 96.654%. Natural DEV3 contains 600 snippets from DRCD-dev and 600 from Wikipedia, with target counts 的 2268 / 地 333 / 得 133 and frozen SHA256 `4a0d29f320dcf4ebb46a8ae73de61f372ea5201045918733713e75dcdd700487`.
+
+Scores vary substantially across distributions, and one synthetic/template-heavy stress set strongly favored RoFormerV2. Therefore these results are reported as task-specific evidence rather than a universal ranking of Chinese encoders.
+
+### 6. Limitations
+
+1. HCAM is a bidirectional MLM encoder, not an autoregressive chat model.
+2. Context length is 600.
+3. The 18K vocabulary does not cover every Unicode character.
+4. Only three layers use global attention, trading dense global interaction for efficiency.
+5. Whole-piece/span masking remains much harder than standard mixed masking.
+6. The 的/地/得 case study is not a general Chinese benchmark.
+7. Training sources have heterogeneous upstream licenses. This repository does not redistribute raw corpora, and the model-weight license does not erase third-party terms.
 
 ---
 
-## 12. 最小加载示例
+## Release and licensing / 发布与许可
 
-```python
-import torch
-from modeling_hcam import HCAMTokenizer, load_hcam
+- Repository code / 仓库代码: **Apache-2.0** + `NOTICE`
+- Model weights / 模型权重: **CC BY 4.0** to the extent of the author's rights; attribution required
+- Upstream data / 上游数据: see `DATA_LICENSES.md`
+- Raw training corpora / 原始训练语料: **not redistributed / 不重新分发**
 
-tokenizer = HCAMTokenizer("tokenizer.model")
-model, meta = load_hcam(
-    "hcam_100m_fp32.pt",
-    device="cuda" if torch.cuda.is_available() else "cpu",
-)
+Suggested attribution / 建议署名:
 
-print(meta["inference_config"])
-```
-
-完整模型结构、权重键名和 tokenizer 解析方式应以仓库中的 `modeling_hcam.py` 为准。
-
----
-
-## 13. 开源与许可说明
-
-建议分别明确：
-
-- 代码许可证；
-- 模型权重许可证；
-- 训练数据来源及各自许可；
-- 哪些文件属于作者原创实现；
-- 哪些数据只提供来源与处理方法、不直接再分发。
-
-如果代码与模型权重采用不同许可，应分别提供 `LICENSE` 与 `MODEL_LICENSE.md`。在正式发布权重之前，仍建议逐项复核 Ultra-FineWeb、SkyPile、Wikipedia 以及自有/用户语料的许可与再发布条件。
-
----
-
-## 14. 结果解释原则
-
-HCAM 100M 是一次约 100M 参数量级的中文混合卷积-注意力 MLM 实验。当前结果支持以下较谨慎的结论：
-
-- 7 层双向局部卷积 + 3 层全局 GQA 的混合结构能够稳定完成大规模中文 MLM 预训练；
-- 字符 tokenizer 与 SentencePiece 边界指导可以分离：前者负责模型输入，后者只帮助构造更结构化的 mask；
-- 模型在标准混合遮蔽上达到 60.58% Top-1，在更困难的整组/跨度遮蔽上仍保持 43.87% Top-1；
-- 在一个小型“的 / 地 / 得”下游任务中，首次 HCAM 微调模型在两套自然文本验证中均表现出较强结果，并在这些具体测试上优于同期 RoFormerV2 基线；
-- 这些下游结果不能替代标准中文基准，也不应被外推为对其他模型的通用排名。
-
-本次开源的核心价值是提供**预训练基座、完整结构实现、字符 tokenizer、训练设计与可复现基准方法**，而不是只发布一个下游任务的最终分数。
+> **HCAM 100M by qilimary** — https://github.com/qilimary/HCAM-100M-Chinese-MLM
